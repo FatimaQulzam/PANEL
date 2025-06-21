@@ -1,61 +1,48 @@
 #!/bin/bash
-
 set -e
-
-######################################################################################
-#                                                                                    #
-# Project 'pterodactyl-installer'                                                    #
-#                                                                                    #
-# Copyright (C) 2018 - 2025, Vilhelm Prytz, <vilhelm@prytznet.se>                    #
-#                                                                                    #
-#   This program is free software: you can redistribute it and/or modify             #
-#   it under the terms of the GNU General Public License as published by             #
-#   the Free Software Foundation, either version 3 of the License, or                #
-#   (at your option) any later version.                                              #
-#                                                                                    #
-#   This program is distributed in the hope that it will be useful,                  #
-#   but WITHOUT ANY WARRANTY; without even the implied warranty of                   #
-#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the                    #
-#   GNU General Public License for more details.                                     #
-#                                                                                    #
-#   You should have received a copy of the GNU General Public License                #
-#   along with this program.  If not, see <https://www.gnu.org/licenses/>.           #
-#                                                                                    #
-# https://github.com/pterodactyl-installer/pterodactyl-installer/blob/master/LICENSE #
-#                                                                                    #
-# This script is not associated with the official Pterodactyl Project.               #
-# https://github.com/pterodactyl-installer/pterodactyl-installer                     #
-#                                                                                    #
-######################################################################################
 
 export GITHUB_SOURCE="v1.1.1"
 export SCRIPT_RELEASE="v1.1.1"
-export GITHUB_BASE_URL="https://raw.githubusercontent.com/FatimaQulzam/PANEL"
-
+export GITHUB_BASE_URL="https://raw.githubusercontent.com/FatimaQulzam/SERVER"
 LOG_PATH="/var/log/pterodactyl-installer.log"
+LIB_PATH="/tmp/htd-lib.sh" # ✅ custom file path to avoid clashes
 
-# check for curl
-if ! [ -x "$(command -v curl)" ]; then
-  echo "* curl is required in order for this script to work."
-  echo "* install using apt (Debian and derivatives) or yum/dnf (CentOS)"
+# Check for curl
+if ! command -v curl >/dev/null 2>&1; then
+  echo "* curl is required for this script to work."
+  echo "* install it using apt (Debian/Ubuntu) or yum/dnf (CentOS/RHEL)"
   exit 1
 fi
 
-# Always remove lib.sh, before downloading it
-[ -f /tmp/lib.sh ] && rm -rf /tmp/lib.sh
-curl -sSL -o /tmp/lib.sh "$GITHUB_BASE_URL"/master/lib/lib.sh
-# shellcheck source=lib/lib.sh
-source /tmp/lib.sh
+# Remove old lib.sh if exists
+[ -f "$LIB_PATH" ] && rm -f "$LIB_PATH"
+
+# Download lib.sh safely
+echo "* Downloading lib.sh from GitHub..."
+if ! curl -fsSL -o "$LIB_PATH" "$GITHUB_BASE_URL/master/lib/lib.sh"; then
+  echo "❌ Failed to download lib.sh from $GITHUB_BASE_URL"
+  exit 1
+fi
+
+# Check if lib.sh is valid
+if ! grep -q "^#!/bin/bash" "$LIB_PATH"; then
+  echo "❌ Invalid lib.sh file downloaded. It may be a 404 page or corrupted."
+  cat "$LIB_PATH" | head -n 10
+  exit 1
+fi
+
+# shellcheck source=/dev/null
+source "$LIB_PATH"
 
 execute() {
-  echo -e "\n\n* pterodactyl-installer $(date) \n\n" >>$LOG_PATH
+  echo -e "\n\n* pterodactyl-installer $(date) \n\n" >>"$LOG_PATH"
 
   [[ "$1" == *"canary"* ]] && export GITHUB_SOURCE="master" && export SCRIPT_RELEASE="canary"
   update_lib_source
-  run_ui "${1//_canary/}" |& tee -a $LOG_PATH
+  run_ui "${1//_canary/}" |& tee -a "$LOG_PATH"
 
   if [[ -n $2 ]]; then
-    echo -e -n "* Installation of $1 completed. Do you want to proceed to $2 installation? (y/N): "
+    echo -n "* Installation of $1 completed. Do you want to proceed to $2 installation? (y/N): "
     read -r CONFIRM
     if [[ "$CONFIRM" =~ [Yy] ]]; then
       execute "$2"
@@ -74,20 +61,16 @@ while [ "$done" == false ]; do
     "Install the panel"
     "Install Wings"
     "Install both [0] and [1] on the same machine (wings script runs after panel)"
-    # "Uninstall panel or wings\n"
-
-    "Install panel with canary version of the script (the versions that lives in master, may be broken!)"
-    "Install Wings with canary version of the script (the versions that lives in master, may be broken!)"
+    "Install panel with canary version of the script (may be broken!)"
+    "Install Wings with canary version of the script (may be broken!)"
     "Install both [3] and [4] on the same machine (wings script runs after panel)"
-    "Uninstall panel or wings with canary version of the script (the versions that lives in master, may be broken!)"
+    "Uninstall panel or wings with canary version of the script (may be broken!)"
   )
 
   actions=(
     "panel"
     "wings"
     "panel;wings"
-    # "uninstall"
-
     "panel_canary"
     "wings_canary"
     "panel_canary;wings_canary"
@@ -95,7 +78,6 @@ while [ "$done" == false ]; do
   )
 
   output "What would you like to do?"
-
   for i in "${!options[@]}"; do
     output "[$i] ${options[$i]}"
   done
@@ -105,10 +87,16 @@ while [ "$done" == false ]; do
 
   [ -z "$action" ] && error "Input is required" && continue
 
-  valid_input=("$(for ((i = 0; i <= ${#actions[@]} - 1; i += 1)); do echo "${i}"; done)")
-  [[ ! " ${valid_input[*]} " =~ ${action} ]] && error "Invalid option"
-  [[ " ${valid_input[*]} " =~ ${action} ]] && done=true && IFS=";" read -r i1 i2 <<<"${actions[$action]}" && execute "$i1" "$i2"
+  valid_input=("$(for ((i = 0; i < ${#actions[@]}; i++)); do echo "$i"; done)")
+  if [[ ! " ${valid_input[*]} " =~ " ${action} " ]]; then
+    error "Invalid option"
+    continue
+  fi
+
+  done=true
+  IFS=";" read -r i1 i2 <<<"${actions[$action]}"
+  execute "$i1" "$i2"
 done
 
-# Remove lib.sh, so next time the script is run the, newest version is downloaded.
-rm -rf /tmp/lib.sh
+# Clean up
+rm -f "$LIB_PATH"
