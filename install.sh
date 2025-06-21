@@ -4,35 +4,25 @@ set -e
 export GITHUB_SOURCE="v1.1.1"
 export SCRIPT_RELEASE="v1.1.1"
 export GITHUB_BASE_URL="https://raw.githubusercontent.com/FatimaQulzam/SERVER"
+export LIB_URL="$GITHUB_BASE_URL/master/lib/lib.sh"
 LOG_PATH="/var/log/pterodactyl-installer.log"
-LIB_PATH="/tmp/htd-lib.sh" # ✅ custom file path to avoid clashes
 
-# Check for curl
+# Check curl
 if ! command -v curl >/dev/null 2>&1; then
-  echo "* curl is required for this script to work."
-  echo "* install it using apt (Debian/Ubuntu) or yum/dnf (CentOS/RHEL)"
+  echo "❌ curl is required. Install using apt, yum, or dnf."
   exit 1
 fi
 
-# Remove old lib.sh if exists
-[ -f "$LIB_PATH" ] && rm -f "$LIB_PATH"
-
-# Download lib.sh safely
-echo "* Downloading lib.sh from GitHub..."
-if ! curl -fsSL -o "$LIB_PATH" "$GITHUB_BASE_URL/master/lib/lib.sh"; then
-  echo "❌ Failed to download lib.sh from $GITHUB_BASE_URL"
+# Check if lib.sh is reachable and valid
+if ! curl -fsSL "$LIB_URL" | grep -q "^#!/bin/bash"; then
+  echo "❌ Could not fetch valid lib.sh from GitHub!"
+  curl -s "$LIB_URL" | head -n 10
   exit 1
 fi
 
-# Check if lib.sh is valid
-if ! grep -q "^#!/bin/bash" "$LIB_PATH"; then
-  echo "❌ Invalid lib.sh file downloaded. It may be a 404 page or corrupted."
-  cat "$LIB_PATH" | head -n 10
-  exit 1
-fi
-
-# shellcheck source=/dev/null
-source "$LIB_PATH"
+# ✅ Source lib.sh directly (NO /tmp usage at all)
+# shellcheck disable=SC1090
+source <(curl -fsSL "$LIB_URL")
 
 execute() {
   echo -e "\n\n* pterodactyl-installer $(date) \n\n" >>"$LOG_PATH"
@@ -42,7 +32,7 @@ execute() {
   run_ui "${1//_canary/}" |& tee -a "$LOG_PATH"
 
   if [[ -n $2 ]]; then
-    echo -n "* Installation of $1 completed. Do you want to proceed to $2 installation? (y/N): "
+    echo -n "* Installation of $1 completed. Proceed to $2 installation? (y/N): "
     read -r CONFIRM
     if [[ "$CONFIRM" =~ [Yy] ]]; then
       execute "$2"
@@ -60,11 +50,11 @@ while [ "$done" == false ]; do
   options=(
     "Install the panel"
     "Install Wings"
-    "Install both [0] and [1] on the same machine (wings script runs after panel)"
-    "Install panel with canary version of the script (may be broken!)"
-    "Install Wings with canary version of the script (may be broken!)"
-    "Install both [3] and [4] on the same machine (wings script runs after panel)"
-    "Uninstall panel or wings with canary version of the script (may be broken!)"
+    "Install both [0] and [1] on the same machine"
+    "Install panel with canary version"
+    "Install Wings with canary version"
+    "Install both [3] and [4] on same machine"
+    "Uninstall panel or wings with canary version"
   )
 
   actions=(
@@ -97,6 +87,3 @@ while [ "$done" == false ]; do
   IFS=";" read -r i1 i2 <<<"${actions[$action]}"
   execute "$i1" "$i2"
 done
-
-# Clean up
-rm -f "$LIB_PATH"
